@@ -25,7 +25,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/executor/show_tables_executor.h"
 #include "sql/executor/trx_begin_executor.h"
 #include "sql/executor/trx_end_executor.h"
-#include "sql/stmt/stmt.h"
+#include "sql/stmt/drop_table_stmt.h"
+#include "storage/db/db.h"
 
 RC CommandExecutor::execute(SQLStageEvent *sql_event)
 {
@@ -41,6 +42,15 @@ RC CommandExecutor::execute(SQLStageEvent *sql_event)
     case StmtType::CREATE_TABLE: {
       CreateTableExecutor executor;
       rc = executor.execute(sql_event);
+    } break;
+
+    case StmtType::DROP_TABLE: {
+      const auto &drop = static_cast<const DropTableStmt &>(*stmt);
+      Session *session = sql_event->session_event()->session();
+      if (session->is_trx_multi_operation_mode()) {
+        return RC::UNSUPPORTED;
+      }
+      rc = session->get_current_db()->drop_table(drop.table_name().c_str());
     } break;
 
     case StmtType::DESC_TABLE: {

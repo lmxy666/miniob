@@ -142,7 +142,11 @@ RC DefaultHandler::create_table(const char *dbname, const char *relation_name, s
   return db->create_table(relation_name, attributes, {});
 }
 
-RC DefaultHandler::drop_table(const char *dbname, const char *relation_name) { return RC::UNIMPLEMENTED; }
+RC DefaultHandler::drop_table(const char *dbname, const char *relation_name)
+{
+  Db *db = find_db(dbname);
+  return db == nullptr ? RC::SCHEMA_DB_NOT_OPENED : db->drop_table(relation_name);
+}
 
 Db *DefaultHandler::find_db(const char *dbname) const
 {

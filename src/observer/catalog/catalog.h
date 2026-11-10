@@ -48,6 +48,7 @@ public:
    * @param table_stats The new table statistics to be set.
    */
   void update_table_stats(int table_id, const TableStats &table_stats);
+  void remove_table_stats(int table_id);
 
   /**
    * @brief Gets the singleton instance of the Catalog.

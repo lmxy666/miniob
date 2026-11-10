@@ -36,6 +36,7 @@ public:
   void destroy_trx(Trx *trx) override;
 
   void all_trxes(vector<Trx *> &trxes) override;
+  bool has_active_transactions();
 
   LogReplayer *create_log_replayer(Db &db, LogHandler &log_handler) override;
 
@@ -94,6 +95,7 @@ public:
   RC redo(Db *db, const LogEntry &log_entry) override;
 
   int32_t id() const override { return trx_id_; }
+  bool started() const { return started_; }
 
 private:
   RC   commit_with_trx_id(int32_t commit_id);

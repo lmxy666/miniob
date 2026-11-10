@@ -12,11 +12,18 @@ See the Mulan PSL v2 for more details. */
 // Created by Wangyunlai on 2024/01/10.
 //
 
+#include <shared_mutex>
+
 #include "net/sql_task_handler.h"
 #include "net/communicator.h"
 #include "event/session_event.h"
 #include "event/sql_event.h"
 #include "session/session.h"
+
+namespace {
+// A dropped table must outlive all operators that are still streaming results.
+std::shared_mutex table_lifetime_mutex;
+}  // namespace
 
 RC SqlTaskHandler::handle_event(Communicator *communicator)
 {
@@ -32,9 +39,28 @@ RC SqlTaskHandler::handle_event(Communicator *communicator)
 
   session_stage_.handle_request2(event);
 
+  std::unique_lock exclusive(table_lifetime_mutex, std::defer_lock);
+  std::shared_lock shared(table_lifetime_mutex, std::defer_lock);
   SQLStageEvent sql_event(event, event->query());
 
-  rc = handle_sql(&sql_event);
+  rc = query_cache_stage_.handle_request(&sql_event);
+  if (OB_SUCC(rc)) {
+    rc = parse_stage_.handle_request(&sql_event);
+  }
+
+  if (OB_SUCC(rc) && sql_event.sql_node() != nullptr) {
+    switch (sql_event.sql_node()->flag) {
+      case SCF_CREATE_TABLE:
+      case SCF_CREATE_INDEX:
+      case SCF_DROP_TABLE:
+        exclusive.lock();
+        break;
+      default:
+        shared.lock();
+        break;
+    }
+    rc = handle_sql(&sql_event);
+  }
   if (OB_FAIL(rc)) {
     LOG_TRACE("failed to handle sql. rc=%s", strrc(rc));
     event->sql_result()->set_return_code(rc);
@@ -57,19 +83,7 @@ RC SqlTaskHandler::handle_event(Communicator *communicator)
 
 RC SqlTaskHandler::handle_sql(SQLStageEvent *sql_event)
 {
-  RC rc = query_cache_stage_.handle_request(sql_event);
-  if (OB_FAIL(rc)) {
-    LOG_TRACE("failed to do query cache. rc=%s", strrc(rc));
-    return rc;
-  }
-
-  rc = parse_stage_.handle_request(sql_event);
-  if (OB_FAIL(rc)) {
-    LOG_TRACE("failed to do parse. rc=%s", strrc(rc));
-    return rc;
-  }
-
-  rc = resolve_stage_.handle_request(sql_event);
+  RC rc = resolve_stage_.handle_request(sql_event);
   if (OB_FAIL(rc)) {
     LOG_TRACE("failed to do resolve. rc=%s", strrc(rc));
     return rc;

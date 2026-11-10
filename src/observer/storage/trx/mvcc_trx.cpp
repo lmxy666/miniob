@@ -92,6 +92,17 @@ void MvccTrxKit::all_trxes(vector<Trx *> &trxes)
   lock_.unlock();
 }
 
+bool MvccTrxKit::has_active_transactions()
+{
+  lock_guard<common::Mutex> lock(lock_);
+  for (Trx *trx : trxes_) {
+    if (static_cast<MvccTrx *>(trx)->started()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 LogReplayer *MvccTrxKit::create_log_replayer(Db &db, LogHandler &log_handler)
 {
   return new MvccTrxLogReplayer(db, *this, log_handler);

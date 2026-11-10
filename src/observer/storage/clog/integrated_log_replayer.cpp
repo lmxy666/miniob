@@ -22,15 +22,21 @@ IntegratedLogReplayer::IntegratedLogReplayer(BufferPoolManager &bpm)
       trx_log_replayer_(nullptr)
 {}
 
-IntegratedLogReplayer::IntegratedLogReplayer(BufferPoolManager &bpm, unique_ptr<LogReplayer> trx_log_replayer)
+IntegratedLogReplayer::IntegratedLogReplayer(
+    BufferPoolManager &bpm, unique_ptr<LogReplayer> trx_log_replayer, LSN checkpoint_lsn)
     : buffer_pool_log_replayer_(bpm),
       record_log_replayer_(bpm),
       bplus_tree_log_replayer_(bpm),
+      checkpoint_lsn_(checkpoint_lsn),
       trx_log_replayer_(std::move(trx_log_replayer))
 {}
 
 RC IntegratedLogReplayer::replay(const LogEntry &entry)
 {
+  // The log iterator includes the checkpoint, which has already been flushed.
+  if (entry.lsn() <= checkpoint_lsn_) {
+    return RC::SUCCESS;
+  }
   switch (entry.module().id()) {
     case LogModule::Id::BUFFER_POOL: return buffer_pool_log_replayer_.replay(entry);
     case LogModule::Id::RECORD_MANAGER: return record_log_replayer_.replay(entry);

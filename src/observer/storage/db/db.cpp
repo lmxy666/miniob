@@ -21,10 +21,12 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/os/path.h"
 #include "common/global_context.h"
+#include "catalog/catalog.h"
 #include "storage/common/meta_util.h"
 #include "storage/table/table.h"
 #include "storage/table/table_meta.h"
 #include "storage/trx/trx.h"
+#include "storage/trx/mvcc_trx.h"
 #include "storage/clog/disk_log_handler.h"
 #include "storage/clog/integrated_log_replayer.h"
 
@@ -176,6 +178,61 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   return RC::SUCCESS;
 }
 
+RC Db::drop_table(const char *table_name)
+{
+  auto iter = opened_tables_.find(table_name);
+  if (iter == opened_tables_.end()) {
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  Table *table = iter->second;
+  const TableMeta &meta = table->table_meta();
+  // The shared LSM engine does not support removing keys yet.
+  if (meta.storage_engine() != StorageEngine::HEAP) {
+    return RC::UNSUPPORTED;
+  }
+
+  auto *mvcc = dynamic_cast<MvccTrxKit *>(trx_kit_.get());
+  if (mvcc != nullptr && mvcc->has_active_transactions()) {
+    return RC::LOCKED_CONCURRENCY_CONFLICT;
+  }
+
+  vector<string> files;
+  files.emplace_back(table_data_file(path_.c_str(), table_name));
+  files.emplace_back(table_lob_file(path_.c_str(), table_name));
+  for (int i = 0; i < meta.index_num(); ++i) {
+    files.emplace_back(table_index_file(path_.c_str(), table_name, meta.index(i)->name()));
+  }
+
+  // Checkpoint first so restart does not replay old writes to removed files.
+  RC rc = sync();
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
+
+  // Remove the metadata first so a restart never opens a partially deleted table.
+  const string meta_path = table_meta_file(path_.c_str(), table_name);
+  error_code ec;
+  filesystem::remove(meta_path, ec);
+  if (ec) {
+    LOG_ERROR("Failed to remove table metadata. file=%s, error=%s", meta_path.c_str(), ec.message().c_str());
+    return RC::IOERR_ACCESS;
+  }
+
+  Catalog::get_instance().remove_table_stats(table->table_id());
+  opened_tables_.erase(iter);
+  delete table;  // Closes and unregisters data and index buffer pools.
+
+  for (const string &file : files) {
+    filesystem::remove(file, ec);
+    if (ec) {
+      LOG_ERROR("Failed to remove table file. file=%s, error=%s", file.c_str(), ec.message().c_str());
+      rc = RC::IOERR_ACCESS;
+    }
+  }
+  return rc;
+}
+
 Table *Db::find_table(const char *table_name) const
 {
   unordered_map<string, Table *>::const_iterator iter = opened_tables_.find(table_name);
@@ -292,7 +349,7 @@ RC Db::recover()
     return RC::INTERNAL;
   }
 
-  IntegratedLogReplayer log_replayer(*buffer_pool_manager_, unique_ptr<LogReplayer>(trx_log_replayer));
+  IntegratedLogReplayer log_replayer(*buffer_pool_manager_, unique_ptr<LogReplayer>(trx_log_replayer), check_point_lsn_);
   RC                    rc = log_handler_->replay(log_replayer, check_point_lsn_ /*start_lsn*/);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to replay log. rc=%s", strrc(rc));
