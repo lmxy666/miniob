@@ -41,7 +41,8 @@ RC FieldMeta::init(const char *name, AttrType attr_type, int attr_offset, int at
     return RC::INVALID_ARGUMENT;
   }
 
-  if (AttrType::UNDEFINED == attr_type || attr_offset < 0 || attr_len <= 0) {
+  if (AttrType::UNDEFINED == attr_type || attr_offset < 0 || attr_len <= 0 ||
+      (attr_type == AttrType::DATES && attr_len != static_cast<int>(sizeof(int32_t)))) {
     LOG_WARN("Invalid argument. name=%s, attr_type=%d, attr_offset=%d, attr_len=%d",
               name, attr_type, attr_offset, attr_len);
     return RC::INVALID_ARGUMENT;

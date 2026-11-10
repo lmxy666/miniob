@@ -28,10 +28,10 @@ RC CharType::set_value_from_str(Value &val, const string &data) const
 
 RC CharType::cast_to(const Value &val, AttrType type, Value &result) const
 {
-  switch (type) {
-    default: return RC::UNIMPLEMENTED;
+  if (type == AttrType::DATES) {
+    return DataType::type_instance(type)->set_value_from_str(result, val.get_string());
   }
-  return RC::SUCCESS;
+  return RC::UNIMPLEMENTED;
 }
 
 int CharType::cast_cost(AttrType type)

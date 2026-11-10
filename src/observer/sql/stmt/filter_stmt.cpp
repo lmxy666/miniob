@@ -89,7 +89,7 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     return RC::INVALID_ARGUMENT;
   }
 
-  filter_unit = new FilterUnit;
+  auto unit = make_unique<FilterUnit>();
 
   if (condition.left_is_attr) {
     Table           *table = nullptr;
@@ -101,11 +101,11 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     }
     FilterObj filter_obj;
     filter_obj.init_attr(Field(table, field));
-    filter_unit->set_left(filter_obj);
+    unit->set_left(filter_obj);
   } else {
     FilterObj filter_obj;
     filter_obj.init_value(condition.left_value);
-    filter_unit->set_left(filter_obj);
+    unit->set_left(filter_obj);
   }
 
   if (condition.right_is_attr) {
@@ -118,15 +118,38 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     }
     FilterObj filter_obj;
     filter_obj.init_attr(Field(table, field));
-    filter_unit->set_right(filter_obj);
+    unit->set_right(filter_obj);
   } else {
     FilterObj filter_obj;
     filter_obj.init_value(condition.right_value);
-    filter_unit->set_right(filter_obj);
+    unit->set_right(filter_obj);
   }
 
-  filter_unit->set_comp(comp);
+  const FilterObj &left = unit->left();
+  const FilterObj &right = unit->right();
+  const AttrType left_type = left.is_attr ? left.field.attr_type() : left.value.attr_type();
+  const AttrType right_type = right.is_attr ? right.field.attr_type() : right.value.attr_type();
+  if (left_type != right_type && (left_type == AttrType::DATES || right_type == AttrType::DATES)) {
+    const bool date_on_left = left_type == AttrType::DATES;
+    const FilterObj &literal = date_on_left ? right : left;
+    if (literal.is_attr || literal.value.attr_type() != AttrType::CHARS) {
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
+    FilterObj converted;
+    Value date;
+    rc = Value::cast_to(literal.value, AttrType::DATES, date);
+    if (rc != RC::SUCCESS) {
+      return rc;
+    }
+    converted.init_value(date);
+    if (date_on_left) {
+      unit->set_right(converted);
+    } else {
+      unit->set_left(converted);
+    }
+  }
 
-  // 检查两个类型是否能够比较
-  return rc;
+  unit->set_comp(comp);
+  filter_unit = unit.release();
+  return RC::SUCCESS;
 }

@@ -120,6 +120,10 @@ void Value::set_data(char *data, int length)
       value_.int_value_ = *(int *)data;
       length_           = length;
     } break;
+    case AttrType::DATES: {
+      memcpy(&value_.int_value_, data, sizeof(int32_t));
+      length_ = sizeof(int32_t);
+    } break;
     case AttrType::FLOATS: {
       value_.float_value_ = *(float *)data;
       length_             = length;
@@ -138,6 +142,14 @@ void Value::set_int(int val)
 {
   reset();
   attr_type_        = AttrType::INTS;
+  value_.int_value_ = val;
+  length_           = sizeof(val);
+}
+
+void Value::set_date(int32_t val)
+{
+  reset();
+  attr_type_        = AttrType::DATES;
   value_.int_value_ = val;
   length_           = sizeof(val);
 }
@@ -196,6 +208,9 @@ void Value::set_value(const Value &value)
   switch (value.attr_type_) {
     case AttrType::INTS: {
       set_int(value.get_int());
+    } break;
+    case AttrType::DATES: {
+      set_date(value.get_date());
     } break;
     case AttrType::FLOATS: {
       set_float(value.get_float());
