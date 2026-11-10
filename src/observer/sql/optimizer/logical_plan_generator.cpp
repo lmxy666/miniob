@@ -29,6 +29,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
+#include "sql/stmt/update_stmt.h"
+#include "sql/operator/update_logical_operator.h"
 #include "sql/stmt/explain_stmt.h"
 #include "sql/stmt/filter_stmt.h"
 #include "sql/stmt/insert_stmt.h"
@@ -61,6 +63,10 @@ RC LogicalPlanGenerator::create(Stmt *stmt, unique_ptr<LogicalOperator> &logical
 
       rc = create_plan(insert_stmt, logical_operator);
     } break;
+
+    case StmtType::UPDATE: {
+      return create_plan(static_cast<UpdateStmt *>(stmt), logical_operator);
+    }
 
     case StmtType::DELETE: {
       DeleteStmt *delete_stmt = static_cast<DeleteStmt *>(stmt);
@@ -261,6 +267,26 @@ RC LogicalPlanGenerator::create_plan(DeleteStmt *delete_stmt, unique_ptr<Logical
 
   logical_operator = std::move(delete_oper);
   return rc;
+}
+
+RC LogicalPlanGenerator::create_plan(UpdateStmt *stmt, unique_ptr<LogicalOperator> &logical_operator)
+{
+  auto scan = make_unique<TableGetLogicalOperator>(stmt->table(), ReadWriteMode::READ_WRITE);
+  auto update = make_unique<UpdateLogicalOperator>(stmt->table(), stmt->field(), stmt->value());
+
+  unique_ptr<LogicalOperator> predicate;
+  RC rc = create_plan(stmt->filter_stmt(), predicate);
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
+  if (predicate) {
+    predicate->add_child(std::move(scan));
+    update->add_child(std::move(predicate));
+  } else {
+    update->add_child(std::move(scan));
+  }
+  logical_operator = std::move(update);
+  return RC::SUCCESS;
 }
 
 RC LogicalPlanGenerator::create_plan(ExplainStmt *explain_stmt, unique_ptr<LogicalOperator> &logical_operator)

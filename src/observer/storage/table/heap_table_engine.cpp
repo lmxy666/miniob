@@ -103,6 +103,59 @@ RC HeapTableEngine::delete_record(const Record &record)
   return rc;
 }
 
+RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx)
+{
+  if (table_meta_->storage_format() != StorageFormat::ROW_FORMAT) {
+    return RC::UNSUPPORTED;
+  }
+  const RID &rid = old_record.rid();
+  vector<Index *> changed_indexes;
+  for (Index *index : indexes_) {
+    const FieldMeta *field = table_meta_->field(index->index_meta().field());
+    if (memcmp(old_record.data() + field->offset(), new_record.data() + field->offset(), field->len()) != 0) {
+      changed_indexes.push_back(index);
+    }
+  }
+
+  size_t removed = 0;
+  size_t inserted = 0;
+  RC rc = RC::SUCCESS;
+  for (; removed < changed_indexes.size(); ++removed) {
+    rc = changed_indexes[removed]->delete_entry(old_record.data(), &rid);
+    if (OB_FAIL(rc)) {
+      break;
+    }
+  }
+  for (; OB_SUCC(rc) && inserted < changed_indexes.size(); ++inserted) {
+    rc = changed_indexes[inserted]->insert_entry(new_record.data(), &rid);
+    if (OB_FAIL(rc)) {
+      break;
+    }
+  }
+  if (OB_SUCC(rc)) {
+    rc = record_handler_->visit_record(rid, [&new_record](Record &record) {
+      memcpy(record.data(), new_record.data(), new_record.len());
+      return true;
+    });
+  }
+
+  if (OB_FAIL(rc)) {
+    while (inserted > 0) {
+      RC undo = changed_indexes[--inserted]->delete_entry(new_record.data(), &rid);
+      if (OB_FAIL(undo)) {
+        LOG_ERROR("Failed to undo new index entry during UPDATE. rc=%s", strrc(undo));
+      }
+    }
+    while (removed > 0) {
+      RC undo = changed_indexes[--removed]->insert_entry(old_record.data(), &rid);
+      if (OB_FAIL(undo)) {
+        LOG_ERROR("Failed to restore old index entry during UPDATE. rc=%s", strrc(undo));
+      }
+    }
+  }
+  return rc;
+}
+
 RC HeapTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)
 {
   scanner = new HeapRecordScanner(table_, *data_buffer_pool_, trx, db_->log_handler(), mode, nullptr);

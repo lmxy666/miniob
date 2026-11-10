@@ -251,6 +251,19 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   return RC::SUCCESS;
 }
 
+RC Table::make_updated_record(const Record &old_record, const FieldMeta &field, const Value &value, Record &new_record)
+{
+  RC rc = new_record.copy_data(old_record.data(), old_record.len());
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
+  new_record.set_rid(old_record.rid());
+
+  // Clear padding when replacing a CHAR value with a shorter one.
+  memset(new_record.data() + field.offset(), 0, field.len());
+  return set_value_to_record(new_record.data(), value, &field);
+}
+
 RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field)
 {
   size_t       copy_len = field->len();

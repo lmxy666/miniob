@@ -53,6 +53,7 @@ RC SqlTaskHandler::handle_event(Communicator *communicator)
       case SCF_CREATE_TABLE:
       case SCF_CREATE_INDEX:
       case SCF_DROP_TABLE:
+      case SCF_UPDATE:
         exclusive.lock();
         break;
       default:

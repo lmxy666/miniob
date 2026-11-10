@@ -56,7 +56,7 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
   Optimizer optimizer;
   // TODO: error handle
   unique_ptr<PhysicalOperator> physical_operator;
-  if (sql_event->session_event()->session()->use_cascade()) {
+  if (sql_event->session_event()->session()->use_cascade() && logical_operator->type() != LogicalOperatorType::UPDATE) {
     physical_operator = optimizer.optimize(logical_operator.get());
     if (!physical_operator) {
       rc = RC::INTERNAL;

@@ -91,6 +91,7 @@ public:
   RC insert_record_with_trx(Record &record, Trx *trx);
   RC delete_record_with_trx(const Record &record, Trx *trx);
   RC update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx);
+  RC make_updated_record(const Record &old_record, const FieldMeta &field, const Value &value, Record &new_record);
   RC get_record(const RID &rid, Record &record);
 
   // TODO refactor

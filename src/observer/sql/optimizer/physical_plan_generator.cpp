@@ -20,6 +20,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/calc_physical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
+#include "sql/operator/update_logical_operator.h"
+#include "sql/operator/update_physical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
 #include "sql/operator/explain_physical_operator.h"
 #include "sql/operator/expr_vec_physical_operator.h"
@@ -70,6 +72,18 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
     case LogicalOperatorType::INSERT: {
       return create_plan(static_cast<InsertLogicalOperator &>(logical_operator), oper, session);
     } break;
+
+    case LogicalOperatorType::UPDATE: {
+      auto &update = static_cast<UpdateLogicalOperator &>(logical_operator);
+      unique_ptr<PhysicalOperator> child;
+      rc = create(*update.children().front(), child, session);
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      oper = make_unique<UpdatePhysicalOperator>(update.table(), update.field(), update.value());
+      oper->add_child(std::move(child));
+      return RC::SUCCESS;
+    }
 
     case LogicalOperatorType::DELETE: {
       return create_plan(static_cast<DeleteLogicalOperator &>(logical_operator), oper, session);
