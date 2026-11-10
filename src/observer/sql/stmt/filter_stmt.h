@@ -77,6 +77,7 @@ public:
 
 public:
   const vector<FilterUnit *> &filter_units() const { return filter_units_; }
+  void append(FilterStmt &other);
 
 public:
   static RC create(Db *db, Table *default_table, unordered_map<string, Table *> *tables,

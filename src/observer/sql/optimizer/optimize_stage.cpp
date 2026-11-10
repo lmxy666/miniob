@@ -24,6 +24,8 @@ See the Mulan PSL v2 for more details. */
 #include "event/sql_event.h"
 #include "sql/operator/logical_operator.h"
 #include "sql/stmt/stmt.h"
+#include "sql/stmt/explain_stmt.h"
+#include "sql/stmt/select_stmt.h"
 #include "sql/optimizer/cascade/optimizer.h"
 #include "sql/optimizer/optimizer_utils.h"
 
@@ -56,7 +58,19 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
   Optimizer optimizer;
   // TODO: error handle
   unique_ptr<PhysicalOperator> physical_operator;
-  if (sql_event->session_event()->session()->use_cascade() && logical_operator->type() != LogicalOperatorType::UPDATE) {
+  const Stmt *stmt = sql_event->stmt();
+  while (stmt->type() == StmtType::EXPLAIN) {
+    stmt = static_cast<const ExplainStmt *>(stmt)->child();
+  }
+  Session *session = sql_event->session_event()->session();
+  if (stmt->type() == StmtType::SELECT && static_cast<const SelectStmt *>(stmt)->has_explicit_join()) {
+    // This join plan uses row iterators and has predicates placed on individual joins.
+    session->set_used_chunk_mode(false);
+    rc = physical_plan_generator_.create(*logical_operator, physical_operator, session);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+  } else if (session->use_cascade() && logical_operator->type() != LogicalOperatorType::UPDATE) {
     physical_operator = optimizer.optimize(logical_operator.get());
     if (!physical_operator) {
       rc = RC::INTERNAL;

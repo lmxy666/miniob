@@ -21,6 +21,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/explain_logical_operator.h"
 #include "sql/operator/insert_logical_operator.h"
 #include "sql/operator/join_logical_operator.h"
+#include "sql/expr/expression_iterator.h"
 #include "sql/operator/logical_operator.h"
 #include "sql/operator/predicate_logical_operator.h"
 #include "sql/operator/project_logical_operator.h"
@@ -107,13 +108,48 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   const vector<Table *> &tables = select_stmt->tables();
-  for (Table *table : tables) {
+  vector<vector<unique_ptr<Expression>>> scan_filters(tables.size());
+  vector<vector<unique_ptr<Expression>>> join_filters(tables.size());
+  if (select_stmt->has_explicit_join() && predicate_oper) {
+    unordered_map<const Table *, size_t> positions;
+    for (size_t i = 0; i < tables.size(); ++i) {
+      positions.emplace(tables[i], i);
+    }
+    auto &conjunction = static_cast<ConjunctionExpr &>(*predicate_oper->expressions().front());
+    for (auto &condition : conjunction.children()) {
+      size_t first = tables.size();
+      size_t last = 0;
+      auto collect = [&](auto &self, Expression &expr) -> RC {
+        if (expr.type() == ExprType::FIELD) {
+          const size_t index = positions.at(static_cast<FieldExpr &>(expr).field().table());
+          first = std::min(first, index);
+          last = std::max(last, index);
+        }
+        return ExpressionIterator::iterate_child_expr(expr, [&](unique_ptr<Expression> &child) {
+          return self(self, *child);
+        });
+      };
+      rc = collect(collect, *condition);
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      // Single-table conditions go directly to their scan; constants go to the first scan.
+      auto &target = first < last ? join_filters[last] : scan_filters[last];
+      target.emplace_back(std::move(condition));
+    }
+    predicate_oper.reset();
+  }
 
-    unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
+  for (size_t i = 0; i < tables.size(); ++i) {
+    auto table_get_oper = make_unique<TableGetLogicalOperator>(tables[i], ReadWriteMode::READ_ONLY);
+    table_get_oper->set_predicates(std::move(scan_filters[i]));
     if (table_oper == nullptr) {
       table_oper = std::move(table_get_oper);
     } else {
       JoinLogicalOperator *join_oper = new JoinLogicalOperator;
+      for (auto &filter : join_filters[i]) {
+        join_oper->add_join_predicate(std::move(filter));
+      }
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
       table_oper = unique_ptr<LogicalOperator>(join_oper);

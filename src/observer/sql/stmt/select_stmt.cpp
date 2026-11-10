@@ -61,6 +61,11 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     table_map.insert({table_name, table});
   }
 
+  const bool explicit_join = !select_sql.on_clauses.empty();
+  if (explicit_join && table_map.size() != tables.size()) {
+    return RC::INVALID_ARGUMENT;
+  }
+
   // collect query fields in `select` statement
   vector<unique_ptr<Expression>> bound_expressions;
   ExpressionBinder expression_binder(binder_context);
@@ -70,6 +75,15 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     if (OB_FAIL(rc)) {
       LOG_INFO("bind expression failed. rc=%s", strrc(rc));
       return rc;
+    }
+  }
+
+  if (explicit_join) {
+    for (auto &expression : bound_expressions) {
+      if (expression->type() == ExprType::FIELD) {
+        const Field &field = static_cast<const FieldExpr &>(*expression).field();
+        expression->set_name(string(field.table_name()) + "." + field.field_name());
+      }
     }
   }
 
@@ -100,12 +114,29 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     return rc;
   }
 
+  unique_ptr<FilterStmt> filters(filter_stmt);
+  for (const auto &clause : select_sql.on_clauses) {
+    // An ON clause sees its own comma-separated join chain up to this join.
+    unordered_map<string, Table *> scope;
+    for (size_t i = clause.first_relation; i < clause.end_relation; ++i) {
+      scope.emplace(select_sql.relations[i], tables[i]);
+    }
+    FilterStmt *bound = nullptr;
+    rc = FilterStmt::create(db, nullptr, &scope, clause.conditions.data(), static_cast<int>(clause.conditions.size()), bound);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+    unique_ptr<FilterStmt> on_filter(bound);
+    filters->append(*on_filter);
+  }
+
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
   select_stmt->tables_.swap(tables);
   select_stmt->query_expressions_.swap(bound_expressions);
-  select_stmt->filter_stmt_ = filter_stmt;
+  select_stmt->filter_stmt_ = filters.release();
+  select_stmt->has_explicit_join_ = explicit_join;
   select_stmt->group_by_.swap(group_by_expressions);
   stmt                      = select_stmt;
   return RC::SUCCESS;

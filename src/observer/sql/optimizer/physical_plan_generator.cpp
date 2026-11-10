@@ -321,30 +321,53 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     LOG_WARN("join operator should have 2 children, but have %d", child_opers.size());
     return RC::INTERNAL;
   }
-  if (session->hash_join_on() && can_use_hash_join(join_oper)) {
-    // your code here
-  } else {
-    unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
-    for (auto &child_oper : child_opers) {
-      unique_ptr<PhysicalOperator> child_physical_oper;
-      rc = create(*child_oper, child_physical_oper, session);
-      if (rc != RC::SUCCESS) {
-        LOG_WARN("failed to create physical child oper. rc=%s", strrc(rc));
-        return rc;
+  unique_ptr<PhysicalOperator> join;
+  auto &predicates = join_oper.get_join_predicates();
+  if (child_opers[1]->type() == LogicalOperatorType::TABLE_GET) {
+    const auto *right_table = static_cast<const TableGetLogicalOperator &>(*child_opers[1]).table();
+    for (auto &expression : predicates) {
+      auto &condition = static_cast<ComparisonExpr &>(*expression);
+      if (condition.comp() != EQUAL_TO ||
+          condition.left()->type() != ExprType::FIELD || condition.right()->type() != ExprType::FIELD) {
+        continue;
       }
-
-      join_physical_oper->add_child(std::move(child_physical_oper));
+      const auto *left_key = &static_cast<FieldExpr &>(*condition.left()).field();
+      const auto *right_key = &static_cast<FieldExpr &>(*condition.right()).field();
+      if (left_key->table() == right_table) {
+        std::swap(left_key, right_key);
+      }
+      const AttrType type = left_key->attr_type();
+      if (right_key->table() != right_table || left_key->table() == right_table || type != right_key->attr_type() ||
+          (type != AttrType::INTS && type != AttrType::DATES && type != AttrType::CHARS)) {
+        continue;
+      }
+      join = make_unique<HashJoinPhysicalOperator>(
+          TupleCellSpec(left_key->table_name(), left_key->field_name()),
+          TupleCellSpec(right_key->table_name(), right_key->field_name()));
+      break;
     }
-
-    oper = std::move(join_physical_oper);
   }
-  return rc;
-}
+  if (!join) {
+    join = make_unique<NestedLoopJoinPhysicalOperator>();
+  }
+  for (auto &child : child_opers) {
+    unique_ptr<PhysicalOperator> physical_child;
+    rc = create(*child, physical_child, session);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+    join->add_child(std::move(physical_child));
+  }
 
-bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
-{
-  // your code here
-  return false;
+  if (predicates.empty()) {
+    oper = std::move(join);
+  } else {
+    auto conjunction = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, predicates);
+    auto filter = make_unique<PredicatePhysicalOperator>(std::move(conjunction));
+    filter->add_child(std::move(join));
+    oper = std::move(filter);
+  }
+  return RC::SUCCESS;
 }
 
 RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)

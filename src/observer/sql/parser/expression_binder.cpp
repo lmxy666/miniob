@@ -144,12 +144,18 @@ RC ExpressionBinder::bind_unbound_field_expression(
 
   Table *table = nullptr;
   if (is_blank(table_name)) {
-    if (context_.query_tables().size() != 1) {
-      LOG_INFO("cannot determine table for field: %s", field_name);
-      return RC::SCHEMA_TABLE_NOT_EXIST;
+    for (Table *candidate : context_.query_tables()) {
+      const FieldMeta *field = candidate->table_meta().field(field_name);
+      if (field != nullptr && field->visible()) {
+        if (table != nullptr) {
+          return RC::SCHEMA_FIELD_MISSING;
+        }
+        table = candidate;
+      }
     }
-
-    table = context_.query_tables()[0];
+    if (table == nullptr) {
+      return RC::SCHEMA_FIELD_MISSING;
+    }
   } else {
     table = context_.find_table(table_name);
     if (nullptr == table) {

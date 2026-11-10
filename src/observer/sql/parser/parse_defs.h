@@ -86,8 +86,22 @@ struct ConditionSqlNode
  * 甚至可以包含复杂的表达式。
  */
 
+struct JoinOnSqlNode
+{
+  size_t first_relation;
+  size_t end_relation;
+  vector<ConditionSqlNode> conditions;
+};
+
+struct FromSqlNode
+{
+  vector<string> relations;
+  vector<JoinOnSqlNode> on_clauses;
+};
+
 struct SelectSqlNode
 {
+  vector<JoinOnSqlNode> on_clauses;
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
   vector<string>                 relations;    ///< 查询的表
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件

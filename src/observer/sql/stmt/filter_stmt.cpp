@@ -27,6 +27,12 @@ FilterStmt::~FilterStmt()
   filter_units_.clear();
 }
 
+void FilterStmt::append(FilterStmt &other)
+{
+  filter_units_.insert(filter_units_.end(), other.filter_units_.begin(), other.filter_units_.end());
+  other.filter_units_.clear();
+}
+
 RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
     const ConditionSqlNode *conditions, int condition_num, FilterStmt *&stmt)
 {
@@ -55,6 +61,17 @@ RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table
 {
   if (common::is_blank(attr.relation_name.c_str())) {
     table = default_table;
+    if (table == nullptr && tables != nullptr) {
+      for (const auto &[name, candidate] : *tables) {
+        const FieldMeta *candidate_field = candidate->table_meta().field(attr.attribute_name.c_str());
+        if (candidate_field != nullptr && candidate_field->visible()) {
+          if (table != nullptr) {
+            return RC::SCHEMA_FIELD_NOT_EXIST;  // Ambiguous unqualified column.
+          }
+          table = candidate;
+        }
+      }
+    }
   } else if (nullptr != tables) {
     auto iter = tables->find(attr.relation_name);
     if (iter != tables->end()) {

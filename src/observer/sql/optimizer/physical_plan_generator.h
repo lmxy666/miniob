@@ -60,5 +60,4 @@ private:
   RC create_vec_plan(ExplainLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session *session);
 
   // TODO: remove this and add CBO rules
-  bool can_use_hash_join(JoinLogicalOperator &logical_oper);
 };

@@ -41,6 +41,7 @@ public:
 public:
   const vector<Table *> &tables() const { return tables_; }
   FilterStmt            *filter_stmt() const { return filter_stmt_; }
+  bool has_explicit_join() const { return has_explicit_join_; }
 
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
@@ -49,5 +50,6 @@ private:
   vector<unique_ptr<Expression>> query_expressions_;
   vector<Table *>                tables_;
   FilterStmt                    *filter_stmt_ = nullptr;
+  bool                           has_explicit_join_ = false;
   vector<unique_ptr<Expression>> group_by_;
 };
