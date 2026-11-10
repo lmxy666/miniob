@@ -63,8 +63,9 @@ RC OptimizeStage::handle_request(SQLStageEvent *sql_event)
     stmt = static_cast<const ExplainStmt *>(stmt)->child();
   }
   Session *session = sql_event->session_event()->session();
-  if (stmt->type() == StmtType::SELECT && static_cast<const SelectStmt *>(stmt)->has_explicit_join()) {
-    // This join plan uses row iterators and has predicates placed on individual joins.
+  const auto *select = stmt->type() == StmtType::SELECT ? static_cast<const SelectStmt *>(stmt) : nullptr;
+  if (select != nullptr && (select->has_explicit_join() || select->uses_vectors())) {
+    // Join predicates and vector expressions use row iterators.
     session->set_used_chunk_mode(false);
     rc = physical_plan_generator_.create(*logical_operator, physical_operator, session);
     if (OB_FAIL(rc)) {

@@ -83,6 +83,11 @@ RC PersistHandler::open_file(const char *file_name)
   return rc;
 }
 
+RC PersistHandler::sync()
+{
+  return fsync(file_desc_) == 0 ? RC::SUCCESS : RC::IOERR_SYNC;
+}
+
 RC PersistHandler::close_file()
 {
   RC rc = RC::SUCCESS;

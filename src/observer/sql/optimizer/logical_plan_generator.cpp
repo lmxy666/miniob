@@ -95,6 +95,10 @@ RC LogicalPlanGenerator::create_plan(CalcStmt *calc_stmt, unique_ptr<LogicalOper
 
 RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  if (select_stmt->tables().empty()) {
+    logical_operator = make_unique<CalcLogicalOperator>(std::move(select_stmt->query_expressions()));
+    return RC::SUCCESS;
+  }
   unique_ptr<LogicalOperator> *last_oper = nullptr;
 
   unique_ptr<LogicalOperator> table_oper(nullptr);

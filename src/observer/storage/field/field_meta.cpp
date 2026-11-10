@@ -13,6 +13,7 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "storage/field/field_meta.h"
+#include "common/type/vector_type.h"
 #include "common/lang/string.h"
 #include "common/log/log.h"
 #include "sql/parser/parse_defs.h"
@@ -85,6 +86,9 @@ void FieldMeta::to_json(Json::Value &json_value) const
   json_value[FIELD_LEN]     = attr_len_;
   json_value[FIELD_VISIBLE] = visible_;
   json_value[FIELD_FIELD_ID] = field_id_;
+  if (attr_type_ == AttrType::VECTORS) {
+    json_value["vector_capacity"] = vector_capacity_;
+  }
 }
 
 RC FieldMeta::from_json(const Json::Value &json_value, FieldMeta &field)
@@ -138,5 +142,13 @@ RC FieldMeta::from_json(const Json::Value &json_value, FieldMeta &field)
   int         len     = len_value.asInt();
   bool        visible = visible_value.asBool();
   int         field_id  = field_id_value.asInt();
+  if (type == AttrType::VECTORS) {
+    const Json::Value &capacity = json_value["vector_capacity"];
+    if (!capacity.isInt() || capacity.asInt() <= 0 || capacity.asInt() > VectorType::MAX_CAPACITY ||
+        len != static_cast<int>(sizeof(VectorReference))) {
+      return RC::INVALID_ARGUMENT;
+    }
+    field.set_vector_capacity(capacity.asInt());
+  }
   return field.init(name, type, offset, len, visible, field_id);
 }

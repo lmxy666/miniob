@@ -196,8 +196,12 @@ public:
     FieldExpr       *field_expr = speces_[index];
     const FieldMeta *field_meta = field_expr->field().meta();
     cell.reset();
+    const char *data = this->record_->data() + field_meta->offset();
+    if (field_meta->type() == AttrType::VECTORS) {
+      return table_->read_vector(data, *field_meta, cell);
+    }
     cell.set_type(field_meta->type());
-    cell.set_data(this->record_->data() + field_meta->offset(), field_meta->len());
+    cell.set_data(data, field_meta->len());
     return RC::SUCCESS;
   }
 

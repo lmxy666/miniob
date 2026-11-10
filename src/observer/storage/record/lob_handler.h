@@ -34,8 +34,9 @@ public:
 
   RC insert_data(int64_t &offset, int64_t length, const char *data);
 
-  RC get_data(int64_t offset, int64_t length, char *data) { return file_.read_at(offset, length, data); }
+  RC get_data(int64_t offset, int64_t length, char *data);
 
 private:
+  common::Mutex mutex_;
   PersistHandler file_;
 };

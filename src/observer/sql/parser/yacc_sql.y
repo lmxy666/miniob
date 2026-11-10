@@ -11,6 +11,8 @@
 #include "sql/parser/yacc_sql.hpp"
 #include "sql/parser/lex_sql.h"
 #include "sql/expr/expression.h"
+#include "sql/expr/vector_function_expr.h"
+#include "common/type/vector_type.h"
 
 using namespace std;
 
@@ -90,6 +92,10 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         FLOAT_T
         DATE_T
         VECTOR_T
+        AS
+        STRING_TO_VECTOR_T
+        VECTOR_TO_STRING_T
+        DISTANCE_T
         HELP
         EXIT
         DOT //QUOTE
@@ -163,7 +169,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 /** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
 %type <number>              type
 %type <condition>           condition
-%type <value>               value
+%type <value>               value constant_value
 %type <number>              number
 %type <cstring>             relation
 %type <comp>                comp_op
@@ -177,9 +183,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            primary_key
 %type <key_list>            attr_list
 %type <from_clause>         rel_list joined_table
-%type <expression>          expression
+%type <expression>          expression select_item vector_function
 %type <expression>          aggregate_expression
-%type <expression_list>     expression_list
+%type <expression_list>     expression_list select_list
 %type <expression_list>     group_by
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
@@ -373,7 +379,7 @@ attr_def:
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
-      $$->length = 4;
+      $$->length = $$->type == AttrType::VECTORS ? VectorType::DEFAULT_CAPACITY : 4;
     }
     ;
 number:
@@ -424,16 +430,26 @@ insert_stmt:        /*insert   语句的语法解析树*/
     ;
 
 value_list:
-    value
+    constant_value
     {
       $$ = new vector<Value>;
       $$->emplace_back(*$1);
       delete $1;
     }
-    | value_list COMMA value { 
+    | value_list COMMA constant_value {
       $$ = $1;
       $$->emplace_back(*$3);
       delete $3;
+    }
+    ;
+constant_value:
+    value { $$ = $1; }
+    | vector_function {
+      unique_ptr<Expression> expression($1);
+      $$ = new Value;
+      if (expression->try_get_value(*$$) != RC::SUCCESS) {
+        $$->reset();
+      }
     }
     ;
 value:
@@ -474,7 +490,7 @@ delete_stmt:    /*  delete 语句的语法解析树*/
     }
     ;
 update_stmt:      /*  update 语句的语法解析树*/
-    UPDATE ID SET ID EQ value where 
+    UPDATE ID SET ID EQ constant_value where
     {
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
@@ -487,7 +503,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT select_list FROM rel_list where group_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -511,6 +527,12 @@ select_stmt:        /*  select 语句的语法解析树*/
         delete $6;
       }
     }
+    | SELECT select_list
+    {
+      $$ = new ParsedSqlNode(SCF_SELECT);
+      $$->selection.expressions.swap(*$2);
+      delete $2;
+    }
     ;
 calc_stmt:
     CALC expression_list
@@ -518,6 +540,40 @@ calc_stmt:
       $$ = new ParsedSqlNode(SCF_CALC);
       $$->calc.expressions.swap(*$2);
       delete $2;
+    }
+    ;
+
+select_list:
+    select_item {
+      $$ = new vector<unique_ptr<Expression>>;
+      $$->emplace_back($1);
+    }
+    | select_list COMMA select_item {
+      $$ = $1;
+      $$->emplace_back($3);
+    }
+    ;
+
+select_item:
+    expression { $$ = $1; }
+    | expression AS ID {
+      $$ = $1;
+      $$->set_alias($3);
+    }
+    ;
+
+vector_function:
+    STRING_TO_VECTOR_T LBRACE expression RBRACE {
+      $$ = new VectorFunctionExpr(VectorFunctionExpr::Kind::FROM_STRING, $3);
+      $$->set_name(token_name(sql_string, &@$));
+    }
+    | VECTOR_TO_STRING_T LBRACE expression RBRACE {
+      $$ = new VectorFunctionExpr(VectorFunctionExpr::Kind::TO_STRING, $3);
+      $$->set_name(token_name(sql_string, &@$));
+    }
+    | DISTANCE_T LBRACE expression COMMA expression COMMA expression RBRACE {
+      $$ = new VectorFunctionExpr(VectorFunctionExpr::Kind::DISTANCE, $3, $5, $7);
+      $$->set_name(token_name(sql_string, &@$));
     }
     ;
 
@@ -571,6 +627,7 @@ expression:
       $$->set_name(token_name(sql_string, &@$));
       delete $1;
     }
+    | vector_function { $$ = $1; }
     | aggregate_expression {
       $$ = $1;
     }
@@ -656,7 +713,7 @@ condition_list:
     }
     ;
 condition:
-    rel_attr comp_op value
+    rel_attr comp_op constant_value
     {
       $$ = new ConditionSqlNode;
       $$->left_is_attr = 1;
@@ -668,7 +725,7 @@ condition:
       delete $1;
       delete $3;
     }
-    | value comp_op value 
+    | constant_value comp_op constant_value
     {
       $$ = new ConditionSqlNode;
       $$->left_is_attr = 0;
@@ -692,7 +749,7 @@ condition:
       delete $1;
       delete $3;
     }
-    | value comp_op rel_attr
+    | constant_value comp_op rel_attr
     {
       $$ = new ConditionSqlNode;
       $$->left_is_attr = 0;

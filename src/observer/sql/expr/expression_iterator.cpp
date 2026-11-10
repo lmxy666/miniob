@@ -13,6 +13,7 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/expr/expression_iterator.h"
+#include "sql/expr/vector_function_expr.h"
 #include "sql/expr/expression.h"
 #include "common/log/log.h"
 
@@ -23,6 +24,16 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
   RC rc = RC::SUCCESS;
 
   switch (expr.type()) {
+    case ExprType::VECTOR_FUNCTION: {
+      auto &function = static_cast<VectorFunctionExpr &>(expr);
+      for (auto &arg : function.arguments()) {
+        rc = callback(arg);
+        if (OB_FAIL(rc)) {
+          break;
+        }
+      }
+    } break;
+
     case ExprType::CAST: {
       auto &cast_expr = static_cast<CastExpr &>(expr);
       rc = callback(cast_expr.child());

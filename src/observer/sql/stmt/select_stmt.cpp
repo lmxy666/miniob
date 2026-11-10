@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/db/db.h"
 #include "storage/table/table.h"
 #include "sql/parser/expression_binder.h"
+#include "sql/expr/expression_iterator.h"
 
 using namespace std;
 using namespace common;
@@ -71,16 +72,25 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   ExpressionBinder expression_binder(binder_context);
   
   for (unique_ptr<Expression> &expression : select_sql.expressions) {
+    const string alias = expression->alias();
+    const size_t first = bound_expressions.size();
     RC rc = expression_binder.bind_expression(expression, bound_expressions);
     if (OB_FAIL(rc)) {
       LOG_INFO("bind expression failed. rc=%s", strrc(rc));
       return rc;
     }
+    if (!alias.empty()) {
+      if (bound_expressions.size() != first + 1) {
+        return RC::INVALID_ARGUMENT;
+      }
+      bound_expressions.back()->set_alias(alias);
+      bound_expressions.back()->set_name(alias);
+    }
   }
 
   if (explicit_join) {
     for (auto &expression : bound_expressions) {
-      if (expression->type() == ExprType::FIELD) {
+      if (expression->type() == ExprType::FIELD && expression->alias().empty()) {
         const Field &field = static_cast<const FieldExpr &>(*expression).field();
         expression->set_name(string(field.table_name()) + "." + field.field_name());
       }
@@ -137,6 +147,26 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filters.release();
   select_stmt->has_explicit_join_ = explicit_join;
+  for (Table *table : select_stmt->tables_) {
+    for (const auto &field : *table->table_meta().field_metas()) {
+      select_stmt->uses_vectors_ |= field.type() == AttrType::VECTORS;
+    }
+  }
+  auto detect_vectors = [&](auto &self, Expression &expression) -> RC {
+    if (expression.type() == ExprType::VECTOR_FUNCTION || expression.value_type() == AttrType::VECTORS) {
+      select_stmt->uses_vectors_ = true;
+      return RC::SUCCESS;
+    }
+    return ExpressionIterator::iterate_child_expr(expression, [&](unique_ptr<Expression> &child) {
+      return child ? self(self, *child) : RC::SUCCESS;
+    });
+  };
+  for (auto &expression : select_stmt->query_expressions_) {
+    if (select_stmt->uses_vectors_) {
+      break;
+    }
+    detect_vectors(detect_vectors, *expression);
+  }
   select_stmt->group_by_.swap(group_by_expressions);
   stmt                      = select_stmt;
   return RC::SUCCESS;

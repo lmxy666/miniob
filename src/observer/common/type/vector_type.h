@@ -16,17 +16,27 @@ See the Mulan PSL v2 for more details. */
  * @brief 向量类型
  * @ingroup DataType
  */
+struct VectorReference
+{
+  int64_t offset;
+  int64_t byte_count;
+};
+
 class VectorType : public DataType
 {
 public:
   VectorType() : DataType(AttrType::VECTORS) {}
   virtual ~VectorType() {}
 
-  int compare(const Value &left, const Value &right) const override { return INT32_MAX; }
+  static constexpr int DEFAULT_CAPACITY = 2048;
+  static constexpr int MAX_CAPACITY = 16383;
+
+  int compare(const Value &left, const Value &right) const override;
+  RC set_value_from_str(Value &val, const string &data) const override;
 
   RC add(const Value &left, const Value &right, Value &result) const override { return RC::UNIMPLEMENTED; }
   RC subtract(const Value &left, const Value &right, Value &result) const override { return RC::UNIMPLEMENTED; }
   RC multiply(const Value &left, const Value &right, Value &result) const override { return RC::UNIMPLEMENTED; }
 
-  RC to_string(const Value &val, string &result) const override { return RC::UNIMPLEMENTED; }
+  RC to_string(const Value &val, string &result) const override;
 };

@@ -118,6 +118,8 @@ public:
   void set_date(int32_t val);
   int32_t get_date() const { return value_.int_value_; }
   void set_float(float val);
+  void set_vector(const char *data, int byte_count);
+  float vector_element(int index) const;
   void set_string(const char *s, int len = 0);
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);

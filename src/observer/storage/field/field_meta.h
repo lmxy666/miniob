@@ -42,6 +42,8 @@ public:
   int         len() const;
   bool        visible() const;
   int         field_id() const;
+  int vector_capacity() const { return vector_capacity_; }
+  void set_vector_capacity(int capacity) { vector_capacity_ = capacity; }
 
 public:
   void desc(ostream &os) const;
@@ -57,4 +59,5 @@ protected:
   int      attr_len_;
   bool     visible_;
   int      field_id_;
+  int vector_capacity_ = 0;
 };

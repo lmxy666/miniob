@@ -37,6 +37,11 @@ Value::Value(const Value &other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   switch (this->attr_type_) {
+    case AttrType::VECTORS: {
+      this->own_data_ = true;
+      this->value_.pointer_value_ = new char[length_];
+      memcpy(this->value_.pointer_value_, other.data(), length_);
+    } break;
     case AttrType::CHARS: {
       set_string_from_other(other);
     } break;
@@ -67,6 +72,11 @@ Value &Value::operator=(const Value &other)
   this->length_    = other.length_;
   this->own_data_  = other.own_data_;
   switch (this->attr_type_) {
+    case AttrType::VECTORS: {
+      this->own_data_ = true;
+      this->value_.pointer_value_ = new char[length_];
+      memcpy(this->value_.pointer_value_, other.data(), length_);
+    } break;
     case AttrType::CHARS: {
       set_string_from_other(other);
     } break;
@@ -96,6 +106,7 @@ Value &Value::operator=(Value &&other)
 void Value::reset()
 {
   switch (attr_type_) {
+    case AttrType::VECTORS:
     case AttrType::CHARS:
       if (own_data_ && value_.pointer_value_ != nullptr) {
         delete[] value_.pointer_value_;
@@ -113,6 +124,9 @@ void Value::reset()
 void Value::set_data(char *data, int length)
 {
   switch (attr_type_) {
+    case AttrType::VECTORS: {
+      set_vector(data, length);
+    } break;
     case AttrType::CHARS: {
       set_string(data, length);
     } break;
@@ -152,6 +166,23 @@ void Value::set_date(int32_t val)
   attr_type_        = AttrType::DATES;
   value_.int_value_ = val;
   length_           = sizeof(val);
+}
+
+void Value::set_vector(const char *data, int byte_count)
+{
+  reset();
+  attr_type_ = AttrType::VECTORS;
+  length_ = byte_count;
+  own_data_ = true;
+  value_.pointer_value_ = new char[byte_count];
+  memcpy(value_.pointer_value_, data, byte_count);
+}
+
+float Value::vector_element(int index) const
+{
+  float value;
+  memcpy(&value, data() + index * sizeof(float), sizeof(value));
+  return value;
 }
 
 void Value::set_float(float val)
@@ -205,12 +236,18 @@ void Value::set_empty_string(int len)
 
 void Value::set_value(const Value &value)
 {
+  if (&value == this) {
+    return;
+  }
   switch (value.attr_type_) {
     case AttrType::INTS: {
       set_int(value.get_int());
     } break;
     case AttrType::DATES: {
       set_date(value.get_date());
+    } break;
+    case AttrType::VECTORS: {
+      set_vector(value.data(), value.length());
     } break;
     case AttrType::FLOATS: {
       set_float(value.get_float());
@@ -230,16 +267,19 @@ void Value::set_value(const Value &value)
 void Value::set_string_from_other(const Value &other)
 {
   ASSERT(attr_type_ == AttrType::CHARS, "attr type is not CHARS");
-  if (own_data_ && other.value_.pointer_value_ != nullptr && length_ != 0) {
+  if (own_data_ && other.value_.pointer_value_ != nullptr) {
     this->value_.pointer_value_ = new char[this->length_ + 1];
     memcpy(this->value_.pointer_value_, other.value_.pointer_value_, this->length_);
     this->value_.pointer_value_[this->length_] = '\0';
+  } else {
+    this->value_.pointer_value_ = other.value_.pointer_value_;
   }
 }
 
 char *Value::data() const
 {
   switch (attr_type_) {
+    case AttrType::VECTORS:
     case AttrType::CHARS: {
       return value_.pointer_value_;
     } break;

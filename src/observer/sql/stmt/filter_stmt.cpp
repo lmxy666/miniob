@@ -146,6 +146,13 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
   const FilterObj &right = unit->right();
   const AttrType left_type = left.is_attr ? left.field.attr_type() : left.value.attr_type();
   const AttrType right_type = right.is_attr ? right.field.attr_type() : right.value.attr_type();
+  if (left_type == AttrType::UNDEFINED || right_type == AttrType::UNDEFINED) {
+    return RC::INVALID_ARGUMENT;
+  }
+  if ((left_type == AttrType::VECTORS || right_type == AttrType::VECTORS) &&
+      (left_type != right_type || (comp != EQUAL_TO && comp != NOT_EQUAL))) {
+    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+  }
   if (left_type != right_type && (left_type == AttrType::DATES || right_type == AttrType::DATES)) {
     const bool date_on_left = left_type == AttrType::DATES;
     const FilterObj &literal = date_on_left ? right : left;

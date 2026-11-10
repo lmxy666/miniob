@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/string.h"
 #include "common/lang/ranges.h"
 #include "sql/parser/expression_binder.h"
+#include "sql/expr/vector_function_expr.h"
 #include "sql/expr/expression_iterator.h"
 
 using namespace common;
@@ -69,6 +70,38 @@ RC ExpressionBinder::bind_expression(unique_ptr<Expression> &expr, vector<unique
     case ExprType::VALUE: {
       return bind_value_expression(expr, bound_expressions);
     } break;
+
+    case ExprType::VECTOR_FUNCTION: {
+      auto &function = static_cast<VectorFunctionExpr &>(*expr);
+      for (auto &arg : function.arguments()) {
+        vector<unique_ptr<Expression>> bound;
+        RC rc = bind_expression(arg, bound);
+        if (OB_FAIL(rc)) {
+          return rc;
+        }
+        if (bound.size() != 1) {
+          return RC::INVALID_ARGUMENT;
+        }
+        arg = std::move(bound.front());
+      }
+      RC rc = function.validate_types();
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      Value constant;
+      rc = function.try_get_value(constant);
+      if (OB_SUCC(rc)) {
+        auto folded = make_unique<ValueExpr>(constant);
+        folded->set_name(function.name());
+        folded->set_alias(function.alias());
+        bound_expressions.emplace_back(std::move(folded));
+      } else if (rc == RC::UNIMPLEMENTED) {
+        bound_expressions.emplace_back(std::move(expr));
+      } else {
+        return rc;
+      }
+      return RC::SUCCESS;
+    }
 
     case ExprType::CAST: {
       return bind_cast_expression(expr, bound_expressions);

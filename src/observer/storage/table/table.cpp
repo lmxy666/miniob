@@ -29,6 +29,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/index.h"
 #include "storage/record/record_manager.h"
 #include "storage/table/table.h"
+#include "common/type/vector_type.h"
 #include "storage/trx/trx.h"
 #include "storage/record/heap_record_scanner.h"
 #include "storage/record/lsm_record_scanner.h"
@@ -63,6 +64,20 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   }
 
   RC rc = RC::SUCCESS;
+
+  bool has_vectors = false;
+  for (const auto &attr : attributes) {
+    if (attr.type == AttrType::VECTORS) {
+      if (attr.length <= 0 || attr.length > VectorType::MAX_CAPACITY) {
+        return RC::INVALID_ARGUMENT;
+      }
+      if (storage_engine != StorageEngine::HEAP || storage_format != StorageFormat::ROW_FORMAT ||
+          std::find(primary_keys.begin(), primary_keys.end(), attr.name) != primary_keys.end()) {
+        return RC::UNSUPPORTED;
+      }
+      has_vectors = true;
+    }
+  }
 
   // 使用 table_name.table记录一个表的元数据
   // 判断表文件是否已经存在
@@ -99,6 +114,14 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   db_       = db;
 
   string             data_file = table_data_file(base_dir, name);
+  if (has_vectors) {
+    auto handler = make_unique<LobFileHandler>();
+    rc = handler->create_file(table_lob_file(base_dir, name).c_str());
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+    lob_handler_ = handler.release();
+  }
   BufferPoolManager &bpm       = db->buffer_pool_manager();
   rc                           = bpm.create_file(data_file.c_str());
   if (rc != RC::SUCCESS) {
@@ -143,6 +166,18 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
   fs.close();
 
   db_       = db;
+
+  for (const auto &field : *table_meta_.field_metas()) {
+    if (field.type() == AttrType::VECTORS) {
+      auto handler = make_unique<LobFileHandler>();
+      RC rc = handler->open_file(table_lob_file(base_dir, name()).c_str());
+      if (OB_FAIL(rc)) {
+        return rc;
+      }
+      lob_handler_ = handler.release();
+      break;
+    }
+  }
 
   // // 加载数据文件
   // RC rc = init_record_handler(base_dir);
@@ -266,6 +301,18 @@ RC Table::make_updated_record(const Record &old_record, const FieldMeta &field, 
 
 RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field)
 {
+  if (field->type() == AttrType::VECTORS) {
+    VectorReference reference{0, value.length()};
+    if (value.attr_type() != AttrType::VECTORS || reference.byte_count <= 0 ||
+        reference.byte_count % sizeof(float) != 0 || reference.byte_count > field->vector_capacity() * static_cast<int>(sizeof(float))) {
+      return RC::INVALID_ARGUMENT;
+    }
+    RC rc = lob_handler_->insert_data(reference.offset, reference.byte_count, value.data());
+    if (OB_SUCC(rc)) {
+      memcpy(record_data + field->offset(), &reference, sizeof(reference));
+    }
+    return rc;
+  }
   size_t       copy_len = field->len();
   const size_t data_len = value.length();
   if (field->type() == AttrType::CHARS) {
@@ -287,8 +334,27 @@ RC Table::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode m
   return engine_->get_chunk_scanner(scanner, trx, mode);
 }
 
+RC Table::read_vector(const char *slot, const FieldMeta &field, Value &value) const
+{
+  VectorReference reference;
+  memcpy(&reference, slot, sizeof(reference));
+  if (lob_handler_ == nullptr || reference.offset < 0 || reference.byte_count <= 0 ||
+      reference.byte_count % sizeof(float) != 0 || reference.byte_count > field.vector_capacity() * static_cast<int>(sizeof(float))) {
+    return RC::IOERR_READ;
+  }
+  vector<char> data(reference.byte_count);
+  RC rc = lob_handler_->get_data(reference.offset, reference.byte_count, data.data());
+  if (OB_SUCC(rc)) {
+    value.set_vector(data.data(), data.size());
+  }
+  return rc;
+}
+
 RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
 {
+  if (field_meta->type() == AttrType::VECTORS) {
+    return RC::UNSUPPORTED;
+  }
   return engine_->create_index(trx, field_meta, index_name);
 }
 

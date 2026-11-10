@@ -37,12 +37,19 @@ RC PlainCommunicator::read_event(SessionEvent *&event)
   int data_len = 0;
   int read_len = 0;
 
-  const int    max_packet_size = 8192;
-  vector<char> buf(max_packet_size);
+  constexpr int max_packet_size = 1024 * 1024;
+  vector<char> buf(8192);
 
   // 持续接收消息，直到遇到'\0'。将'\0'遇到的后续数据直接丢弃没有处理，因为目前仅支持一收一发的模式
   while (true) {
-    read_len = ::read(fd_, buf.data() + data_len, max_packet_size - data_len);
+    if (data_len == static_cast<int>(buf.size())) {
+      if (data_len == max_packet_size) {
+        LOG_WARN("The length of sql exceeds the limitation %d", max_packet_size);
+        return RC::IOERR_TOO_LONG;
+      }
+      buf.resize(std::min(max_packet_size, data_len * 2));
+    }
+    read_len = ::read(fd_, buf.data() + data_len, buf.size() - data_len);
     if (read_len < 0) {
       if (errno == EAGAIN) {
         continue;
@@ -50,11 +57,6 @@ RC PlainCommunicator::read_event(SessionEvent *&event)
       break;
     }
     if (read_len == 0) {
-      break;
-    }
-
-    if (read_len + data_len > max_packet_size) {
-      data_len += read_len;
       break;
     }
 
@@ -74,10 +76,6 @@ RC PlainCommunicator::read_event(SessionEvent *&event)
     data_len += read_len;
   }
 
-  if (data_len > max_packet_size) {
-    LOG_WARN("The length of sql exceeds the limitation %d", max_packet_size);
-    return RC::IOERR_TOO_LONG;
-  }
   if (read_len == 0) {
     LOG_INFO("The peer has been closed %s", addr());
     return RC::IOERR_CLOSE;

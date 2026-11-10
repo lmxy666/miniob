@@ -28,6 +28,7 @@ RC LobFileHandler::open_file(const char *file_name)
 
 RC LobFileHandler::insert_data(int64_t &offset, int64_t length, const char *data)
 {
+  lock_guard<common::Mutex> lock(mutex_);
   RC       rc         = RC::SUCCESS;
   int64_t  out_size   = 0;
   int64_t end_offset = 0;
@@ -39,6 +40,13 @@ RC LobFileHandler::insert_data(int64_t &offset, int64_t length, const char *data
     return RC::IOERR_WRITE;
   }
   offset = end_offset;
+  return file_.sync();
+}
 
-  return rc;
+RC LobFileHandler::get_data(int64_t offset, int64_t length, char *data)
+{
+  lock_guard<common::Mutex> lock(mutex_);
+  int64_t bytes_read = 0;
+  RC rc = file_.read_at(offset, length, data, &bytes_read);
+  return OB_FAIL(rc) ? rc : (bytes_read == length ? RC::SUCCESS : RC::IOERR_READ);
 }
