@@ -212,7 +212,23 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
                                      ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
                                      : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
 
-    if (left->value_type() != right->value_type()) {
+    const AttrType left_value_type = left->value_type();
+    const AttrType right_value_type = right->value_type();
+    const bool string_numeric =
+        (left_value_type == AttrType::CHARS &&
+            (right_value_type == AttrType::INTS || right_value_type == AttrType::FLOATS)) ||
+        (right_value_type == AttrType::CHARS &&
+            (left_value_type == AttrType::INTS || left_value_type == AttrType::FLOATS));
+    if (string_numeric) {
+      // Convert both operands to float: converting "16.5a" to int would lose its fraction.
+      // Keep field casts in the plan so numeric comparisons cannot use a string index.
+      if (left_value_type != AttrType::FLOATS) {
+        left = make_unique<CastExpr>(std::move(left), AttrType::FLOATS);
+      }
+      if (right_value_type != AttrType::FLOATS) {
+        right = make_unique<CastExpr>(std::move(right), AttrType::FLOATS);
+      }
+    } else if (left_value_type != right_value_type) {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
       auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
       if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {

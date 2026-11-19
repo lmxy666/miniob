@@ -28,6 +28,11 @@ RC CharType::set_value_from_str(Value &val, const string &data) const
 
 RC CharType::cast_to(const Value &val, AttrType type, Value &result) const
 {
+  if (type == AttrType::FLOATS) {
+    // Numeric comparisons use the numeric prefix ("16a" -> 16, "abc" -> 0).
+    result.set_float(val.get_float());
+    return RC::SUCCESS;
+  }
   if (type == AttrType::DATES) {
     return DataType::type_instance(type)->set_value_from_str(result, val.get_string());
   }
